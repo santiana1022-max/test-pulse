@@ -6,7 +6,10 @@ import ink.testpulse.common.ResultCode;
 import ink.testpulse.entity.InterfaceInfo;
 import ink.testpulse.service.InterfaceInfoService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import ink.testpulse.dto.InterfaceQueryRequest;
 
 import java.util.List;
 
@@ -19,6 +22,17 @@ public class InterfaceInfoController {
 
     @Autowired
     private InterfaceInfoService interfaceInfoService;
+
+    /**
+     * 分页多条件查询接口列表
+     * 适合用于前端的综合搜索面板
+     */
+    @PostMapping("/page")
+    public Result<Page<InterfaceInfo>> pageQuery(@Validated @RequestBody InterfaceQueryRequest request) {
+
+        Page<InterfaceInfo> pageResult = interfaceInfoService.queryPage(request);
+        return Result.success(pageResult);
+    }
 
     /**
      * 新增接口
