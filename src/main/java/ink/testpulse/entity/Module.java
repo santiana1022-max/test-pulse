@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
  * 模块实体类
  */
 @Data
-@TableName("sys_module")
+@TableName("tp_module")
 public class Module {
 
     @TableId(type = IdType.AUTO)
