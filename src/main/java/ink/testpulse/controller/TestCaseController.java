@@ -1,14 +1,12 @@
 package ink.testpulse.controller;
 
 import ink.testpulse.common.Result;
+import ink.testpulse.dto.TestCaseDetailResponse;
 import ink.testpulse.dto.TestCaseSaveRequest;
 import ink.testpulse.service.TestCaseService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.validation.annotation.Validated;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 /**
  * 测试用例控制层
@@ -31,5 +29,15 @@ public class TestCaseController {
 
         // 返回生成的主键 ID，前端拿到后可以跳转到用例详情页
         return Result.success(caseId);
+    }
+
+    /**
+     * 获取测试用例详情
+     * 会自动级联查询步骤列表，并带出每个步骤对应接口的 Method 和 Path
+     */
+    @GetMapping("/{id}")
+    public Result<TestCaseDetailResponse> getDetail(@PathVariable Long id) {
+        TestCaseDetailResponse detail = testCaseService.getDetail(id);
+        return Result.success(detail);
     }
 }

@@ -10,9 +10,18 @@ import lombok.Data;
 public class InterfaceDebugRequest {
 
     /**
-     * 完整的请求URL (如: http://localhost:8080/api/login)
+     * 选中的环境ID (如果不传，则退化为自由模式，必须传完整的url)
      */
-    @NotBlank(message = "请求URL不能为空")
+    private Long environmentId;
+
+    /**
+     * 接口路径 (如: /api/v1/login)
+     */
+    private String path;
+
+    /**
+     * 完整的请求URL (用于没有选中环境时的自由发包)
+     */
     private String url;
 
     /**
@@ -21,23 +30,8 @@ public class InterfaceDebugRequest {
     @NotBlank(message = "请求方法不能为空")
     private String method;
 
-    /**
-     * 请求头配置 (通常是 List<Map<String, String>> 结构)
-     */
     private Object requestHeaders;
-
-    /**
-     * URL参数配置 (Query参数)
-     */
     private Object requestParams;
-
-    /**
-     * 请求体类型 (none/form-data/json/raw等)
-     */
     private String requestBodyType;
-
-    /**
-     * 请求体内容 (JSON字符串或表单配置)
-     */
     private String requestBody;
 }

@@ -6,6 +6,8 @@ import ink.testpulse.common.BusinessException;
 import ink.testpulse.common.ResultCode;
 import ink.testpulse.dto.InterfaceDebugRequest;
 import ink.testpulse.dto.InterfaceDebugResponse;
+import ink.testpulse.entity.Environment;
+import ink.testpulse.service.EnvironmentService;
 import ink.testpulse.service.HttpEngineService;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
@@ -28,13 +30,19 @@ public class HttpEngineServiceImpl implements HttpEngineService {
     @Autowired
     private ObjectMapper objectMapper;
 
+    // 引入环境服务
+    @Autowired
+    private EnvironmentService environmentService;
+
     @Override
     public InterfaceDebugResponse executeRequest(InterfaceDebugRequest request) {
         try {
-            // 1. 构建 URL (如果有 Query 参数，拼接到 URL 后面)
-            HttpUrl.Builder urlBuilder = HttpUrl.parse(request.getUrl()).newBuilder();
+            // 1. 智能拼装最终的 URL (核心改造点)
+            String finalUrlStr = buildFinalUrl(request);
+
+            HttpUrl.Builder urlBuilder = HttpUrl.parse(finalUrlStr).newBuilder();
             if (urlBuilder == null) {
-                throw new BusinessException(ResultCode.VALIDATE_FAILED);
+                throw new BusinessException( "非法的请求URL格式: " + finalUrlStr);
             }
 
             // 解析并添加 Query Params
@@ -49,7 +57,6 @@ public class HttpEngineServiceImpl implements HttpEngineService {
             // 2. 构建 Request.Builder 并设置 URL 和 Headers
             Request.Builder requestBuilder = new Request.Builder().url(finalUrl);
 
-            // 解析并添加 Headers
             List<Map<String, String>> headers = parseObjectToList(request.getRequestHeaders());
             for (Map<String, String> header : headers) {
                 if (StringUtils.hasText(header.get("name"))) {
@@ -57,15 +64,11 @@ public class HttpEngineServiceImpl implements HttpEngineService {
                 }
             }
 
-            // 3. 构建请求体 Body (仅 POST/PUT/PATCH 等需要)
+            // 3. 构建请求体 Body
             RequestBody requestBody = buildRequestBody(request);
-
-            // OkHttp 要求 POST/PUT 必须有 Body，如果前端传了 none，我们需要造一个空的
             if (requestBody == null && HttpMethodRequiresBody(request.getMethod())) {
                 requestBody = RequestBody.create(new byte[0], null);
             }
-
-            // 设置请求方法和 Body
             requestBuilder.method(request.getMethod().toUpperCase(), requestBody);
 
             // 4. 发送请求并计算耗时
@@ -98,20 +101,43 @@ public class HttpEngineServiceImpl implements HttpEngineService {
     }
 
     /**
-     * 判断 HTTP 方法是否强制要求带 Body
+     * 根据是否选择环境，动态拼装最终的请求 URL
      */
+    private String buildFinalUrl(InterfaceDebugRequest request) {
+        // 如果前端传了环境ID，则走拼装逻辑
+        if (request.getEnvironmentId() != null) {
+            Environment env = environmentService.getById(request.getEnvironmentId());
+            if (env == null) {
+                throw new BusinessException( "所选的运行环境不存在");
+            }
+            String baseUrl = env.getBaseUrl();
+            String path = request.getPath() == null ? "" : request.getPath();
+
+            // 优雅处理斜杠，防止出现 http://api.com//login 这种双斜杠错误
+            if (baseUrl.endsWith("/") && path.startsWith("/")) {
+                return baseUrl + path.substring(1);
+            } else if (!baseUrl.endsWith("/") && !path.startsWith("/") && StringUtils.hasText(path)) {
+                return baseUrl + "/" + path;
+            }
+            return baseUrl + path;
+        }
+
+        // 如果没传环境ID，必须传完整的URL
+        if (!StringUtils.hasText(request.getUrl())) {
+            throw new BusinessException("未选择环境时，必须提供完整的请求URL");
+        }
+        return request.getUrl();
+    }
+
     private boolean HttpMethodRequiresBody(String method) {
         String upperMethod = method.toUpperCase();
         return "POST".equals(upperMethod) || "PUT".equals(upperMethod) || "PATCH".equals(upperMethod);
     }
 
-    /**
-     * 根据类型构建 RequestBody
-     */
     private RequestBody buildRequestBody(InterfaceDebugRequest request) {
         String method = request.getMethod().toUpperCase();
         if ("GET".equals(method) || "DELETE".equals(method)) {
-            return null; // GET 和 DELETE 通常不需要 Body
+            return null;
         }
 
         String bodyType = request.getRequestBodyType();
@@ -120,20 +146,12 @@ public class HttpEngineServiceImpl implements HttpEngineService {
         if ("json".equalsIgnoreCase(bodyType) && StringUtils.hasText(bodyContent)) {
             return RequestBody.create(bodyContent, MediaType.parse("application/json; charset=utf-8"));
         }
-        // 预留扩展: form-data, x-www-form-urlencoded 等可以在这里后续补充
-
         return null;
     }
 
-    /**
-     * 将前端传来的 Object (可能是 JSON 数组) 转换为 List<Map<String, String>>
-     */
     private List<Map<String, String>> parseObjectToList(Object obj) {
-        if (obj == null) {
-            return List.of();
-        }
+        if (obj == null) return List.of();
         try {
-            // 将 Object 先转成 JSON 字符串，再反序列化为 List<Map>，保证类型安全
             String jsonStr = objectMapper.writeValueAsString(obj);
             return objectMapper.readValue(jsonStr, new TypeReference<List<Map<String, String>>>() {});
         } catch (Exception e) {
