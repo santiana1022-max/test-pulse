@@ -45,13 +45,13 @@ public class TestCaseRunnerServiceImpl implements TestCaseRunnerService {
         // 1. 获取测试用例主壳
         TestCase testCase = testCaseService.getById(caseId);
         if (testCase == null) {
-            throw new BusinessException(ResultCode.VALIDATE_FAILED.getCode(), "测试用例不存在");
+            throw new BusinessException( "测试用例不存在");
         }
 
         // 2. 初始化全局环境与变量池 (Context)
         Environment env = environmentService.getById(environmentId);
         if (env == null) {
-            throw new BusinessException(ResultCode.VALIDATE_FAILED.getCode(), "运行环境不存在");
+            throw new BusinessException( "运行环境不存在");
         }
 
         // 将数据库里的 JSON 变量池转为 Java Map 大管家
@@ -81,7 +81,7 @@ public class TestCaseRunnerServiceImpl implements TestCaseRunnerService {
             // 4.1 获取接口骨架
             InterfaceInfo interfaceInfo = interfaceInfoService.getById(step.getInterfaceId());
             if (interfaceInfo == null) {
-                throw new BusinessException(ResultCode.ERROR.getCode(), "步骤关联的接口模板不存在");
+                throw new BusinessException("步骤关联的接口模板不存在");
             }
 
             // 4.2 组装请求参数并进行正则变量替换 {{xxx}}

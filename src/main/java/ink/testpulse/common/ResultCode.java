@@ -18,6 +18,7 @@ public enum ResultCode {
     // --- 项目模块范围 (1000-1999) ---
     PROJECT_IDENTIFIER_EXISTS(1001, "该项目标识符已存在，请重新输入"),
     PROJECT_NOT_FOUND(1002, "找不到指定的项目信息"),
+    PARAM_IS_INVALID(1003,"项目id不可为空"),
 
     // --- 模块范围 (2000-2999) ---
     MODULE_PARENT_NOT_FOUND(2001, "父模块不存在"),

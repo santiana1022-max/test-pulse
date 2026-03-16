@@ -4,99 +4,118 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import ink.testpulse.common.BusinessException;
 import ink.testpulse.common.ResultCode;
+import ink.testpulse.dto.ModuleSaveRequest;
+import ink.testpulse.dto.ModuleTreeResponse;
 import ink.testpulse.entity.Module;
-import ink.testpulse.entity.vo.ModuleVO;
 import ink.testpulse.mapper.ModuleMapper;
 import ink.testpulse.service.ModuleService;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Map;
 
 @Service
 public class ModuleServiceImpl extends ServiceImpl<ModuleMapper, Module> implements ModuleService {
 
     @Override
-    public boolean createModule(Module module) {
-        // 1. 处理层级 (Level) 逻辑
-        if (module.getParentId() == null || module.getParentId() == 0) {
-            // 顶级模块
+    @Transactional(rollbackFor = Exception.class)
+    public void saveModule(ModuleSaveRequest request) {
+        Module module = new Module();
+        BeanUtils.copyProperties(request, module);
+
+        // 1. 处理层级逻辑
+        if (request.getParentId() == null || request.getParentId() == 0) {
             module.setParentId(0L);
             module.setLevel(1);
         } else {
-            // 子模块：查询父模块深度
-            Module parent = this.getById(module.getParentId());
+            Module parent = this.getById(request.getParentId());
             if (parent == null) {
                 throw new BusinessException(ResultCode.MODULE_PARENT_NOT_FOUND);
             }
             int newLevel = parent.getLevel() + 1;
-            // 严格限制不能超过 3 层
+            // 维持你的 3 层深度限制
             if (newLevel > 3) {
                 throw new BusinessException(ResultCode.MODULE_DEPTH_EXCEED);
             }
             module.setLevel(newLevel);
         }
 
-        // 2. 初始化统计数据
-        module.setInterfaceCount(0);
-        module.setCaseCount(0);
+        // 2. 初始化/更新统计数据 (如果是新增)
+        if (module.getId() == null) {
+            module.setInterfaceCount(0);
+            module.setCaseCount(0);
+        }
 
-        return this.save(module);
+        this.saveOrUpdate(module);
     }
 
     @Override
-    public List<ModuleVO> getModuleTree(Long projectId) {
-        // 1. 一次性查出该项目下的所有模块 (避免在循环中查数据库)
-        LambdaQueryWrapper<Module> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Module::getProjectId, projectId)
-                .orderByAsc(Module::getId); // 默认按创建顺序排
-
-        List<Module> allModules = this.list(wrapper);
-
-        // 2. 将实体类转换为 VO
-        List<ModuleVO> voList = allModules.stream().map(m -> {
-            ModuleVO vo = new ModuleVO();
-            BeanUtils.copyProperties(m, vo);
-            return vo;
-        }).collect(Collectors.toList());
-
-        // 3. 递归构建树形结构 (从顶级节点 parentId = 0 开始)
-        return buildTree(voList, 0L);
-    }
-
-    /**
-     * 递归组装树的辅助方法
-     */
-    private List<ModuleVO> buildTree(List<ModuleVO> list, Long parentId) {
-        return list.stream()
-                // 找到当前父节点的所有直接子节点
-                .filter(node -> node.getParentId().equals(parentId))
-                // 递归为其设置子节点
-                .peek(node -> node.setChildren(buildTree(list, node.getId())))
-                .collect(Collectors.toList());
-    }
-
-    @Override
-    public boolean deleteModule(Long id) {
+    public ModuleTreeResponse getModuleDetail(Long id) {
         Module module = this.getById(id);
         if (module == null) {
-            return false;
+            throw new BusinessException(ResultCode.MODULE_PARENT_NOT_FOUND);
+        }
+        ModuleTreeResponse response = new ModuleTreeResponse();
+        BeanUtils.copyProperties(module, response);
+        return response;
+    }
+
+    @Override
+    public List<ModuleTreeResponse> getModuleTree(Long projectId) {
+        // 1. 获取该项目下所有模块
+        List<Module> allModules = this.list(new LambdaQueryWrapper<Module>()
+                .eq(Module::getProjectId, projectId)
+                .orderByAsc(Module::getId));
+
+        if (allModules.isEmpty()) return new ArrayList<>();
+
+        // 2. 将所有节点转为 DTO 并存入 Map
+        Map<Long, ModuleTreeResponse> nodeMap = new LinkedHashMap<>();
+        for (Module m : allModules) {
+            ModuleTreeResponse node = new ModuleTreeResponse();
+            BeanUtils.copyProperties(m, node);
+            node.setChildren(new ArrayList<>()); // 必须初始化，防止前端报错
+            nodeMap.put(node.getId(), node);
         }
 
-        // 1. 强校验：是否有子模块？
-        LambdaQueryWrapper<Module> childWrapper = new LambdaQueryWrapper<>();
-        childWrapper.eq(Module::getParentId, id);
-        if (this.count(childWrapper) > 0) {
-            throw new BusinessException(ResultCode.MODULE_HAS_CHILDREN);
+        // 3. 循环遍历 Map，将子节点挂载到父节点下 (非递归 $O(n)$ 算法)
+        List<ModuleTreeResponse> rootNodes = new ArrayList<>();
+        for (ModuleTreeResponse node : nodeMap.values()) {
+            Long parentId = node.getParentId();
+            if (parentId == null || parentId == 0) {
+                rootNodes.add(node);
+            } else {
+                ModuleTreeResponse parentNode = nodeMap.get(parentId);
+                if (parentNode != null) {
+                    parentNode.getChildren().add(node);
+                } else {
+                    // 孤儿节点作为顶级节点处理
+                    rootNodes.add(node);
+                }
+            }
         }
+        return rootNodes;
+    }
 
-        // 2. 强校验：是否有关联接口或用例？
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteModule(Long id) {
+        Module module = this.getById(id);
+        if (module == null) throw new BusinessException(ResultCode.MODULE_PARENT_NOT_FOUND);
+
+        // 1. 校验是否有子模块
+        long childCount = this.count(new LambdaQueryWrapper<Module>().eq(Module::getParentId, id));
+        if (childCount > 0) throw new BusinessException(ResultCode.MODULE_HAS_CHILDREN);
+
+        // 2. 校验是否有关联数据
         if (module.getInterfaceCount() > 0 || module.getCaseCount() > 0) {
             throw new BusinessException(ResultCode.MODULE_HAS_DATA);
         }
 
-        // 3. 通过校验，执行逻辑删除
-        return this.removeById(id);
+        this.removeById(id);
     }
 }
